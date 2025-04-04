@@ -1,62 +1,51 @@
-#include <Windows.h>
-#include <winreg.h>
-#include <stdio.h>
+#include <windows.h>
 #include <iostream>
+#include <setupapi.h>
+#include <devpkey.h>
+#include <winusb.h>
 
+#pragma comment(lib, "setupapi.lib")
+#pragma comment(lib, "kernel32.lib")
 
-void PrintImagePathFromRegistry(const char* path) {
-    HKEY hKey;
-    LONG lResult;
+void ListUSBDevices()
+{
+    // Retrieve a handle to the device information set for all connected devices of USB class
+    HDEVINFO deviceInfoSet = SetupDiGetClassDevs(
+        &GUID_DEVCLASS_USB,    // USB devices class GUID
+        nullptr,               // All devices
+        nullptr,               // Parent window
+        DIGCF_PRESENT | DIGCF_DEVICEINTERFACE
+    );
 
-    lResult = RegOpenKeyExA(HKEY_LOCAL_MACHINE, path, 0, KEY_READ, &hKey);
-    if (lResult != ERROR_SUCCESS) {
-        std::cerr << "Failed to open registry key. Error code: " << lResult << std::endl;
+    if (deviceInfoSet == INVALID_HANDLE_VALUE) {
+        std::cerr << "Failed to get device information set." << std::endl;
         return;
     }
 
-    // Enumerate all subkeys
-    DWORD dwIndex = 0;
-    char SubKey[256];
-    DWORD dwSize = sizeof(SubKey);
-
-    while ((lResult = RegEnumKeyExA(hKey, dwIndex, SubKey, &dwSize, NULL, NULL, NULL, NULL)) == ERROR_SUCCESS) {
-        // For each subkey, open it and query the "ImagePath" value
-        HKEY hSubKey;
-        lResult = RegOpenKeyExA(hKey, SubKey, 0, KEY_READ, &hSubKey);
-        if (lResult == ERROR_SUCCESS) {
-            char szImagePath[1024];
-            DWORD dwImagePathSize = sizeof(szImagePath);
-            lResult = RegQueryValueExA(hSubKey, "ImagePath", NULL, NULL, (LPBYTE)szImagePath, &dwImagePathSize);
-
-            if (lResult == ERROR_SUCCESS) {
-                std::cout << "Subkey: " << SubKey << std::endl;
-                std::cout << "ImagePath: " << szImagePath << std::endl;
-            }
-            else if (lResult == ERROR_FILE_NOT_FOUND) {
-                std::cout << "Subkey: " << SubKey << " does not have an ImagePath value." << std::endl;
-            }
-            else {
-                std::cout << "Failed to query ImagePath for subkey: " << SubKey << ". Error code: " << lResult << std::endl;
-            }
-
-            RegCloseKey(hSubKey);
+    // Enumerate through the devices
+    SP_DEVINFO_DATA deviceInfoData;
+    deviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+    for (DWORD i = 0; SetupDiEnumDeviceInfo(deviceInfoSet, i, &deviceInfoData); i++) {
+        // Get the device description (device name)
+        char deviceName[256];
+        if (SetupDiGetDeviceRegistryProperty(
+                deviceInfoSet, 
+                &deviceInfoData, 
+                SPDRP_DEVICEDESC, 
+                nullptr, 
+                (PBYTE)deviceName, 
+                sizeof(deviceName), 
+                nullptr)) {
+            std::cout << "Device " << i + 1 << ": " << deviceName << std::endl;
         }
-        else {
-            std::cout << "Failed to open subkey: " << SubKey << ". Error code: " << lResult << std::endl;
-        }
-
-        dwSize = sizeof(SubKey);
-        dwIndex++;
     }
 
-    if (lResult != ERROR_NO_MORE_ITEMS) {
-        std::cout << "Error enumerating subkeys. Error code: " << lResult << std::endl;
-    }
-
-    RegCloseKey(hKey);
+    // Cleanup
+    SetupDiDestroyDeviceInfoList(deviceInfoSet);
 }
 
-int main() {
-    PrintImagePathFromRegistry("SYSTEM\\CurrentControlSet\\Services");
+int main()
+{
+    ListUSBDevices();
     return 0;
 }
